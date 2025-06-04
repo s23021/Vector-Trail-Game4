@@ -1,0 +1,1633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Vector-Trail-Game-Ver2.1</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      overscroll-behavior: none; /* Prevents pull-to-refresh */
+      touch-action: none; /* Disables default touch actions like pinch-zoom, double-tap-zoom */
+      background-color: #e0f2fe; /* sky-100 */
+      color: #334155; /* slate-700 */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+      overflow: hidden; /* Hide scrollbars on body */
+      width: 100vw;
+    }
+    #root {
+      width: 100%;
+      height: 100%;
+    }
+    .no-select {
+      -webkit-touch-callout: none; /* iOS Safari */
+      -webkit-user-select: none; /* Safari */
+      -khtml-user-select: none; /* Konqueror HTML */
+      -moz-user-select: none; /* Old versions of Firefox */
+      -ms-user-select: none; /* Internet Explorer/Edge */
+      user-select: none; /* Non-prefixed version, currently supported by Chrome, Edge, Opera and Firefox */
+    }
+    /* Ensure canvas doesn't get selected either */
+    canvas {
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        -khtml-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+        outline: none;
+        -webkit-tap-highlight-color: rgba(0,0,0,0); /* Remove tap highlight on mobile */
+    }
+  </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.1.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
+    "react/": "https://esm.sh/react@^19.1.0/",
+    "three": "https://esm.sh/three@0.164.1",
+    "earcut": "https://esm.sh/earcut@2.2.4"
+  }
+}
+</script>
+</head>
+<body class="no-select">
+  <div id="root"></div>
+  <script type="module">
+// Content from constants.ts
+const CANVAS_WIDTH = 800;
+const CANVAS_HEIGHT = 600;
+const PLAYER_SPEED = 2;
+const PLAYER_CUBE_SIZE = 15;
+const PLAYER_MINIMAP_SIZE = 8;
+const NUMBER_OF_ENEMIES = 2;
+const ENEMY_SPEED = 1.8;
+const ENEMY_CUBE_SIZE = 15;
+const ENEMY_MINIMAP_SIZE = 8;
+
+const PATH_COLOR = '#38bdf8'; // sky-400 (brighter blue)
+const PATH_LINE_WIDTH = 1;
+const TERRITORY_COLOR = 'rgba(125, 211, 252, 0.7)'; // sky-300 with 0.7 alpha (lighter, softer blue)
+const TERRITORY_BORDER_COLOR = TERRITORY_COLOR;
+const PLAYER_COLOR = '#22d3ee'; // Cyan-400 (current is good and bright)
+const BACKGROUND_COLOR = '#cbd5e1'; // slate-300 (for minimap canvas background)
+
+const GROUND_COLOR_3D = '#f5f5f4'; // stone-100 (light stone for 3D ground)
+const STAGE_COLOR = '#FFFFFF'; // White (keep for bright stage)
+const STAGE_TRUE_DEPRESSION_DEPTH = 10;
+const STAGE_RADIUS_FACTOR = 1.9;
+const TERRITORY_EXTRUSION_DEPTH = 12; // Slightly increased for more pop
+const PATH_TUBE_RADIUS_3D = 2.0;
+const PATH_TUBE_RADIAL_SEGMENTS = 6;
+const PATH_TUBE_TUBULAR_SEGMENTS = 64;
+const CAMERA_DISTANCE_OFFSET = 150;
+const CAMERA_HEIGHT_OFFSET = 80;
+const MINIMAP_SIZE = 150;
+
+const ORIGINAL_ENEMY_PATH_COLOR = '#f472b6'; // Pink-400 (bright)
+const ORIGINAL_ENEMY_COLOR = '#ec4899'; // Pink-500 (bright)
+const ORIGINAL_ENEMY_TERRITORY_COLOR = 'rgba(236, 72, 153, 0.7)'; // Pink-500 with 0.7 alpha
+const ORIGINAL_ENEMY_TERRITORY_BORDER_COLOR = ORIGINAL_ENEMY_TERRITORY_COLOR;
+
+const ENEMY_COLOR_PALETTE = [
+  {
+    color: ORIGINAL_ENEMY_COLOR,
+    pathColor: ORIGINAL_ENEMY_PATH_COLOR,
+    territoryColor: ORIGINAL_ENEMY_TERRITORY_COLOR,
+    territoryBorderColor: ORIGINAL_ENEMY_TERRITORY_BORDER_COLOR,
+  },
+  {
+    color: '#f59e0b', // Amber-500
+    pathColor: '#fbbf24', // Amber-400
+    territoryColor: 'rgba(245, 158, 11, 0.7)', // Amber-500 with 0.7 alpha
+    territoryBorderColor: 'rgba(245, 158, 11, 0.7)',
+  },
+  {
+    color: '#84cc16', // Lime-500
+    pathColor: '#a3e635', // Lime-400
+    territoryColor: 'rgba(132, 204, 22, 0.7)', // Lime-500 with 0.7 alpha
+    territoryBorderColor: 'rgba(132, 204, 22, 0.7)',
+  },
+  {
+    color: '#6366f1', // Indigo-500
+    pathColor: '#818cf8', // Indigo-400
+    territoryColor: 'rgba(99, 102, 241, 0.7)', // Indigo-500 with 0.7 alpha
+    territoryBorderColor: 'rgba(99, 102, 241, 0.7)',
+  }
+];
+const INTERSECTION_THRESHOLD = PLAYER_SPEED * 2;
+const MIN_PATH_POINTS_FOR_LOOP = 5;
+const MIN_TERRITORY_AREA_THRESHOLD = 25;
+const ENEMY_COLLISION_THRESHOLD = (PLAYER_CUBE_SIZE / 2) + (ENEMY_CUBE_SIZE / 2) -1;
+const PLAYER_COLLISION_WITH_ENEMY_PATH_THRESHOLD = PLAYER_CUBE_SIZE / 2 + (PATH_TUBE_RADIUS_3D * 2) / 2;
+const GAME_OVER_MESSAGE = "Game Over! Enemy crossed your path.";
+const PLAY_AGAIN_MESSAGE = "Play Again?";
+
+const ANALOG_STICK_PAD_SIZE = 100;
+const ANALOG_STICK_THUMB_SIZE = 50;
+const ANALOG_STICK_DEAD_ZONE = 0.1;
+const ANALOG_STICK_PAD_BG_LIGHT = 'rgba(203, 213, 225, 0.7)'; // slate-300 opacity 0.7
+const ANALOG_STICK_PAD_BG_LIGHT_DISABLED = 'rgba(226, 232, 240, 0.5)'; // slate-200 opacity 0.5
+const ANALOG_STICK_THUMB_BG_LIGHT = 'rgba(148, 163, 184, 0.8)'; // slate-400 opacity 0.8
+const ANALOG_STICK_THUMB_BG_LIGHT_DISABLED = 'rgba(177, 189, 206, 0.5)'; // ~slate-300/400 mix opacity 0.5
+
+const ENEMY_CIRCLE_MIN_RADIUS = 50;
+const ENEMY_CIRCLE_MAX_RADIUS = 100;
+const ENEMY_POINTS_FOR_CLOSURE_ATTEMPT = 180;
+const ENEMY_CLOSURE_TARGET_PATH_OFFSET = 20;
+const ENEMY_OVAL_ANGLE_SPEED_FACTOR = 1.0;
+
+// New constants for bright theme
+const BRIGHT_SCENE_BACKGROUND_THREEJS = 0xbae6fd; // sky-200
+const AMBIENT_LIGHT_INTENSITY_BRIGHT = 0.9;
+const DIRECTIONAL_LIGHT_INTENSITY_BRIGHT = 1.0;
+
+
+// Content from types.ts (commented out as they are for TypeScript)
+/*
+type Position = {
+  x: number;
+  y: number;
+};
+type DirectionVector = {
+  dx: number;
+  dy: number;
+};
+type Path = Position[];
+type Polygon = Position[];
+type TerritoryStyle = {
+  fillColor: string;
+  borderColor: string;
+};
+type DisplayTerritory = {
+  id: number;
+  polygon: Polygon;
+  style: TerritoryStyle;
+  type: 'player' | 'enemy';
+  ownerIdentifier: 'player' | number;
+};
+type EnemyState = {
+  id: number;
+  position: Position;
+  direction: DirectionVector;
+  activePath: Path;
+  newlyFormedPolygonForApp?: Polygon | null;
+  color: string;
+  pathColor: string;
+  territoryColor: string;
+  territoryBorderColor: string;
+  currentColorPaletteIndex: number;
+  aiState: 'drawing_circle' | 'seeking_closure';
+  circleCenter: Position;
+  ovalAngle: number;
+  circleRadius: number;
+  ovalTurnDirection: 1 | -1;
+  closureTargetIndex: number | null;
+  directionAtTerritoryFormation: DirectionVector | null;
+};
+*/
+
+// PlayerAction Enum converted to JS Object
+const PlayerAction = {
+  MOVE_UP: 0,
+  MOVE_DOWN: 1,
+  MOVE_LEFT: 2,
+  MOVE_RIGHT: 3,
+  NONE: 4,
+};
+
+
+// Import React and other global libraries
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import ReactDOM from 'react-dom/client';
+import * as THREE from 'three';
+import earcut from 'earcut';
+
+// Content from components/AnalogStick.tsx
+const AnalogStick = ({ onMove, onRelease, disabled = false }) => {
+  const padRef = useRef(null);
+  const thumbRef = useRef(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const padRadius = ANALOG_STICK_PAD_SIZE / 2;
+  const thumbRadius = ANALOG_STICK_THUMB_SIZE / 2;
+  const maxThumbTravel = padRadius - thumbRadius;
+
+  const handleInteractionStart = useCallback((event) => {
+    if (disabled || !thumbRef.current || !padRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    thumbRef.current.setPointerCapture(event.pointerId);
+    setIsDragging(true);
+    processMove(event.clientX, event.clientY);
+  }, [disabled, maxThumbTravel, padRadius, onMove]);
+
+  const handleInteractionMove = useCallback((event) => {
+    if (!isDragging || disabled || !thumbRef.current || !padRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    processMove(event.clientX, event.clientY);
+  }, [isDragging, disabled, maxThumbTravel, padRadius, onMove]);
+
+  const processMove = useCallback((clientX, clientY) => {
+    if (!padRef.current || !thumbRef.current) return;
+
+    const padRect = padRef.current.getBoundingClientRect();
+    const padCenterX = padRect.left + padRadius;
+    const padCenterY = padRect.top + padRadius;
+
+    let thumbX = clientX - padCenterX;
+    let thumbY = clientY - padCenterY;
+
+    const distance = Math.sqrt(thumbX * thumbX + thumbY * thumbY);
+
+    let dx = 0;
+    let dy = 0;
+
+    if (distance > maxThumbTravel) {
+      thumbX = (thumbX / distance) * maxThumbTravel;
+      thumbY = (thumbY / distance) * maxThumbTravel;
+    }
+
+    if (distance > ANALOG_STICK_DEAD_ZONE * maxThumbTravel) {
+        const moveMagnitude = Math.sqrt(thumbX*thumbX + thumbY*thumbY);
+        if (moveMagnitude > 0) {
+            dx = thumbX / moveMagnitude;
+            dy = thumbY / moveMagnitude;
+        }
+    }
+
+    thumbRef.current.style.transform = `translate(${thumbX}px, ${thumbY}px)`;
+    onMove({ dx, dy });
+  }, [maxThumbTravel, padRadius, onMove, ANALOG_STICK_DEAD_ZONE]);
+
+
+  const handleInteractionEnd = useCallback((event) => {
+    if (!isDragging || !thumbRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+     try {
+        thumbRef.current.releasePointerCapture(event.pointerId);
+    } catch (e) {
+        // Ignore error if pointer capture was already released
+    }
+    setIsDragging(false);
+    thumbRef.current.style.transform = `translate(0px, 0px)`;
+    onRelease();
+    onMove({ dx: 0, dy: 0 });
+  }, [isDragging, onRelease, onMove]);
+
+
+  const padStyle = {
+    width: `${ANALOG_STICK_PAD_SIZE}px`,
+    height: `${ANALOG_STICK_PAD_SIZE}px`,
+    borderRadius: '50%',
+    backgroundColor: disabled ? ANALOG_STICK_PAD_BG_LIGHT_DISABLED : ANALOG_STICK_PAD_BG_LIGHT,
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+    touchAction: 'none',
+    cursor: disabled ? 'not-allowed' : 'grab',
+    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.1)',
+  };
+
+  const thumbStyle = {
+    width: `${ANALOG_STICK_THUMB_SIZE}px`,
+    height: `${ANALOG_STICK_THUMB_SIZE}px`,
+    borderRadius: '50%',
+    backgroundColor: disabled ? ANALOG_STICK_THUMB_BG_LIGHT_DISABLED : ANALOG_STICK_THUMB_BG_LIGHT,
+    position: 'absolute',
+    transition: isDragging ? 'none' : 'transform 0.1s ease-out',
+    boxShadow: '0 3px 6px rgba(0,0,0,0.15), inset 0 -2px 3px rgba(0,0,0,0.05)',
+  };
+
+  return (
+    React.createElement("div", {
+      ref: padRef,
+      style: padStyle,
+      onPointerDown: handleInteractionStart,
+      onPointerMove: isDragging ? handleInteractionMove : undefined,
+      onPointerUp: isDragging ? handleInteractionEnd : undefined,
+      onPointerCancel: isDragging ? handleInteractionEnd : undefined,
+      onPointerLeave: isDragging ? handleInteractionEnd : undefined,
+      role: "slider",
+      "aria-valuemin": -1,
+      "aria-valuemax": 1,
+      "aria-orientation": "horizontal",
+      "aria-label": "Directional control stick",
+      className: disabled ? 'opacity-80 cursor-not-allowed' : '' // Slightly increased opacity for disabled
+    }, React.createElement("div", { ref: thumbRef, style: thumbStyle }))
+  );
+};
+
+// Content from components/CanvasRenderer.tsx
+const CanvasRenderer = ({
+  width,
+  height,
+  playerPosition,
+  activePath,
+  allDisplayTerritories,
+  enemiesState,
+}) => {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.fillStyle = BACKGROUND_COLOR; // Updated constant for minimap bg
+    ctx.fillRect(0, 0, width, height);
+
+    const scaleX = width / CANVAS_WIDTH;
+    const scaleY = height / CANVAS_HEIGHT;
+    const scale = Math.min(scaleX, scaleY);
+
+    const stageCenterX = CANVAS_WIDTH / 2;
+    const stageCenterY = CANVAS_HEIGHT / 2;
+    const stageRadius = Math.min(CANVAS_WIDTH, CANVAS_HEIGHT) / 2 * STAGE_RADIUS_FACTOR;
+
+    ctx.save();
+    ctx.translate(width / 2, height / 2);
+    ctx.scale(scale, scale);
+    ctx.translate(-playerPosition.x, -playerPosition.y);
+
+    ctx.beginPath();
+    ctx.arc(stageCenterX, stageCenterY, stageRadius, 0, 2 * Math.PI);
+    ctx.fillStyle = STAGE_COLOR; // White stage
+    ctx.fill();
+
+    const sortedTerritories = [...allDisplayTerritories].sort((a, b) => a.id - b.id);
+    sortedTerritories.forEach(territory => {
+      if (territory.polygon.length < 3) return;
+      ctx.beginPath();
+      ctx.moveTo(territory.polygon[0].x, territory.polygon[0].y);
+      for (let i = 1; i < territory.polygon.length; i++) {
+        ctx.lineTo(territory.polygon[i].x, territory.polygon[i].y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = territory.style.fillColor; // Uses updated TERRITORY_COLOR with alpha
+      ctx.fill();
+      ctx.strokeStyle = territory.style.borderColor; // Uses updated TERRITORY_BORDER_COLOR
+      ctx.lineWidth = 1 / scale;
+      ctx.stroke();
+    });
+
+    enemiesState.forEach(enemyState => {
+      if (enemyState.activePath.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(enemyState.activePath[0].x, enemyState.activePath[0].y);
+        for (let i = 1; i < enemyState.activePath.length; i++) {
+          ctx.lineTo(enemyState.activePath[i].x, enemyState.activePath[i].y);
+        }
+        ctx.strokeStyle = enemyState.pathColor;
+        ctx.lineWidth = PATH_LINE_WIDTH / scale;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+      }
+    });
+
+    if (activePath.length > 1) {
+      ctx.beginPath();
+      ctx.moveTo(activePath[0].x, activePath[0].y);
+      for (let i = 1; i < activePath.length; i++) {
+        ctx.lineTo(activePath[i].x, activePath[i].y);
+      }
+      ctx.strokeStyle = PATH_COLOR; // Updated constant for player path
+      ctx.lineWidth = PATH_LINE_WIDTH / scale;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+
+    const playerVisualSize = PLAYER_MINIMAP_SIZE / scale;
+    ctx.fillStyle = PLAYER_COLOR;
+    ctx.fillRect(
+        playerPosition.x - playerVisualSize / 2,
+        playerPosition.y - playerVisualSize / 2,
+        playerVisualSize,
+        playerVisualSize
+    );
+
+    const enemyVisualSize = ENEMY_MINIMAP_SIZE / scale;
+    enemiesState.forEach(enemyState => {
+      ctx.fillStyle = enemyState.color;
+      ctx.fillRect(
+          enemyState.position.x - enemyVisualSize / 2,
+          enemyState.position.y - enemyVisualSize / 2,
+          enemyVisualSize,
+          enemyVisualSize
+      );
+    });
+
+    ctx.restore();
+
+  }, [width, height, playerPosition, activePath, allDisplayTerritories, enemiesState]);
+
+  return React.createElement("canvas", { ref: canvasRef, width: width, height: height, className: "minimap-canvas-element" });
+};
+
+// Content from components/GameControls.tsx
+const GameControls = ({
+  onAnalogMove,
+  onAnalogRelease,
+  onStartGame,
+  onPlayAgain,
+  isGameRunning,
+  isGameOver,
+}) => {
+  const actionButtonStyle = "font-medium rounded-lg shadow-md transition-all duration-150 ease-in-out focus:outline-none focus:ring-4 focus:ring-opacity-60 flex items-center justify-center px-6 py-3 text-md sm:text-lg transform active:scale-95";
+
+  return (
+    React.createElement("div", { className: "flex flex-col items-center space-y-3 sm:space-y-4 w-full" },
+      React.createElement(AnalogStick, {
+        onMove: onAnalogMove,
+        onRelease: onAnalogRelease,
+        disabled: isGameOver
+      }),
+      React.createElement("div", { className: "flex space-x-3 sm:space-x-4" },
+        isGameOver ? (
+          React.createElement("button", {
+            onClick: onPlayAgain,
+            className: `${actionButtonStyle} bg-amber-400 hover:bg-amber-500 focus:ring-amber-300 text-amber-900`,
+            "aria-label": "Play Again"
+          }, PLAY_AGAIN_MESSAGE.slice(0,-1))
+        ) : !isGameRunning ? (
+          React.createElement("button", {
+            onClick: onStartGame,
+            className: `${actionButtonStyle} bg-amber-400 hover:bg-amber-500 focus:ring-amber-300 text-amber-900`,
+            "aria-label": "Start Game"
+          }, "Start Game")
+        ) : (
+          React.createElement("button", {
+            onClick: onPlayAgain,
+            className: `${actionButtonStyle} bg-teal-400 hover:bg-teal-500 focus:ring-teal-300 text-teal-900`,
+            "aria-label": "Restart Game"
+          }, "Restart")
+        )
+      )
+    )
+  );
+};
+
+// Content from components/Minimap.tsx
+const Minimap = (props) => {
+  return (
+    React.createElement("div", {
+      className: "minimap-container absolute top-2 sm:top-3 right-2 sm:right-3 border-2 border-sky-300 rounded-full overflow-hidden shadow-lg bg-white/50 backdrop-blur-md",
+      style: {
+        width: props.width,
+        height: props.height,
+        minWidth: '60px',
+        minHeight: '60px',
+      },
+      "aria-label": "Minimap"
+    },
+      React.createElement(CanvasRenderer, {
+        width: props.width,
+        height: props.height,
+        playerPosition: props.playerPosition,
+        activePath: props.activePath,
+        allDisplayTerritories: props.allDisplayTerritories,
+        enemiesState: props.enemiesState
+      })
+    )
+  );
+};
+
+// Content from components/ScoreDisplay.tsx
+const ScoreDisplay = ({ playerScore, enemyScores }) => {
+  return (
+    React.createElement("div", { className: "text-base sm:text-lg font-semibold text-slate-600 flex flex-wrap justify-end items-center space-x-3 sm:space-x-4" },
+      React.createElement("div", { className: "p-1.5 px-2.5 rounded-lg bg-white/60 shadow-md backdrop-blur-sm" },
+        "Player: ", React.createElement("span", { className: "text-sky-500 font-bold" }, playerScore)
+      ),
+      enemyScores.map((enemy, index) => (
+        React.createElement("div", { key: enemy.id, className: "p-1.5 px-2.5 rounded-lg bg-white/60 shadow-md backdrop-blur-sm" },
+          `E${index + 1}: `, React.createElement("span", { style: { color: enemy.color, fontWeight: 'bold' } }, enemy.score)
+        )
+      ))
+    )
+  );
+};
+
+// Content from components/ThreeDeeRenderer.tsx
+const ThreeDeeRenderer = ({
+  width,
+  height,
+  playerPosition,
+  playerDirection,
+  activePath,
+  allDisplayTerritories,
+  enemiesState,
+  isGameRunning,
+}) => {
+  const mountRef = useRef(null);
+  const rendererRef = useRef(null);
+  const sceneRef = useRef(null);
+  const cameraRef = useRef(null);
+
+  const playerMeshRef = useRef(null);
+  const enemyMeshRefs = useRef([]);
+  const playerPathMeshRef = useRef(null);
+  const enemyPathMeshRefs = useRef([]);
+  const territoryGroupRef = useRef(null);
+
+  const outerGroundMeshRef = useRef(null);
+  const depressedStageMeshRef = useRef(null);
+
+  const pathTubeCenterY = -STAGE_TRUE_DEPRESSION_DEPTH + PATH_TUBE_RADIUS_3D + 0.01;
+
+  const mapTo3D = (x, z, y = 0) => {
+    return new THREE.Vector3(x - CANVAS_WIDTH / 2, y, z - CANVAS_HEIGHT / 2);
+  };
+
+  useEffect(() => {
+    if (!mountRef.current) return;
+
+    const scene = new THREE.Scene();
+    sceneRef.current = scene;
+    scene.background = new THREE.Color(BRIGHT_SCENE_BACKGROUND_THREEJS); // Updated background
+
+    const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 2000);
+    cameraRef.current = camera;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    rendererRef.current = renderer;
+    mountRef.current.appendChild(renderer.domElement);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, AMBIENT_LIGHT_INTENSITY_BRIGHT); // Updated intensity
+    scene.add(ambientLight);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, DIRECTIONAL_LIGHT_INTENSITY_BRIGHT); // Updated intensity
+    directionalLight.position.set(50, 100, 75);
+    directionalLight.castShadow = true; // Optional: enable shadows for more depth
+    directionalLight.shadow.mapSize.width = 1024;
+    directionalLight.shadow.mapSize.height = 1024;
+    scene.add(directionalLight);
+    
+    renderer.shadowMap.enabled = true; // Enable shadow map rendering
+
+    const stageRadius = Math.min(CANVAS_WIDTH, CANVAS_HEIGHT) / 2 * STAGE_RADIUS_FACTOR;
+    const outerGroundPlaneSize = Math.max(CANVAS_WIDTH, CANVAS_HEIGHT) * 1.5;
+
+    const outerGroundShape = new THREE.Shape();
+    outerGroundShape.moveTo(-outerGroundPlaneSize / 2, -outerGroundPlaneSize / 2);
+    outerGroundShape.lineTo(outerGroundPlaneSize / 2, -outerGroundPlaneSize / 2);
+    outerGroundShape.lineTo(outerGroundPlaneSize / 2, outerGroundPlaneSize / 2);
+    outerGroundShape.lineTo(-outerGroundPlaneSize / 2, outerGroundPlaneSize / 2);
+    outerGroundShape.closePath();
+
+    const circularHolePath = new THREE.Path();
+    circularHolePath.absarc(0, 0, stageRadius, 0, Math.PI * 2, true);
+    outerGroundShape.holes.push(circularHolePath);
+
+    const outerGroundGeometry = new THREE.ShapeGeometry(outerGroundShape);
+    const outerGroundMaterial = new THREE.MeshStandardMaterial({ color: GROUND_COLOR_3D, side: THREE.DoubleSide }); // Updated color
+    outerGroundMeshRef.current = new THREE.Mesh(outerGroundGeometry, outerGroundMaterial);
+    outerGroundMeshRef.current.rotation.x = -Math.PI / 2;
+    outerGroundMeshRef.current.position.y = 0;
+    outerGroundMeshRef.current.receiveShadow = true;
+    scene.add(outerGroundMeshRef.current);
+
+    const depressedStageGeometry = new THREE.CircleGeometry(stageRadius, 64);
+    const depressedStageMaterial = new THREE.MeshStandardMaterial({ color: STAGE_COLOR, side: THREE.DoubleSide }); // White stage
+    depressedStageMeshRef.current = new THREE.Mesh(depressedStageGeometry, depressedStageMaterial);
+    depressedStageMeshRef.current.rotation.x = -Math.PI / 2;
+    depressedStageMeshRef.current.position.y = -STAGE_TRUE_DEPRESSION_DEPTH;
+    depressedStageMeshRef.current.receiveShadow = true;
+    scene.add(depressedStageMeshRef.current);
+
+    const playerGeometry = new THREE.BoxGeometry(PLAYER_CUBE_SIZE, PLAYER_CUBE_SIZE, PLAYER_CUBE_SIZE);
+    const playerMaterial = new THREE.MeshStandardMaterial({ color: PLAYER_COLOR });
+    playerMeshRef.current = new THREE.Mesh(playerGeometry, playerMaterial);
+    playerMeshRef.current.castShadow = true;
+    scene.add(playerMeshRef.current);
+
+    enemyMeshRefs.current = [];
+    enemyPathMeshRefs.current = [];
+    for (let i = 0; i < NUMBER_OF_ENEMIES; i++) {
+        const enemyState = enemiesState[i] || { color: '#FF0000', pathColor: '#FF00FF' };
+        const enemyGeometry = new THREE.BoxGeometry(ENEMY_CUBE_SIZE, ENEMY_CUBE_SIZE, ENEMY_CUBE_SIZE);
+        const enemyMaterial = new THREE.MeshStandardMaterial({ color: enemyState.color });
+        const enemyMesh = new THREE.Mesh(enemyGeometry, enemyMaterial);
+        enemyMesh.castShadow = true;
+        scene.add(enemyMesh);
+        enemyMeshRefs.current.push(enemyMesh);
+
+        const enemyPathMaterial = new THREE.MeshStandardMaterial({ color: enemyState.pathColor, transparent: true, opacity: 0.85 }); // Slight transparency for paths
+        const enemyPathMesh = new THREE.Mesh(new THREE.BufferGeometry(), enemyPathMaterial);
+        scene.add(enemyPathMesh);
+        enemyPathMeshRefs.current.push(enemyPathMesh);
+    }
+
+    territoryGroupRef.current = new THREE.Group();
+    scene.add(territoryGroupRef.current);
+
+    const playerPathMaterial = new THREE.MeshStandardMaterial({ color: PATH_COLOR, transparent: true, opacity: 0.85 }); // Slight transparency for paths
+    playerPathMeshRef.current = new THREE.Mesh(new THREE.BufferGeometry(), playerPathMaterial);
+    scene.add(playerPathMeshRef.current);
+
+    const animate = () => {
+      if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
+      requestAnimationFrame(animate);
+      rendererRef.current.render(sceneRef.current, cameraRef.current);
+    };
+    animate();
+
+    const handleResize = () => {
+        if (cameraRef.current && rendererRef.current) {
+            cameraRef.current.aspect = width / height;
+            cameraRef.current.updateProjectionMatrix();
+            rendererRef.current.setSize(width, height);
+        }
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (mountRef.current && rendererRef.current) {
+        mountRef.current.removeChild(rendererRef.current.domElement);
+      }
+      rendererRef.current?.dispose();
+      playerGeometry.dispose();
+      playerMaterial.dispose();
+      enemyMeshRefs.current.forEach(mesh => {
+          mesh.geometry.dispose();
+          mesh.material.dispose();
+      });
+      enemyPathMeshRefs.current.forEach(mesh => {
+          mesh.geometry.dispose();
+          mesh.material.dispose();
+      });
+      outerGroundGeometry.dispose();
+      outerGroundMaterial.dispose();
+      depressedStageGeometry.dispose();
+      depressedStageMaterial.dispose();
+      playerPathMeshRef.current?.geometry.dispose();
+      playerPathMeshRef.current?.material?.dispose();
+       if (territoryGroupRef.current) {
+         territoryGroupRef.current.children.forEach(child => {
+            if (child instanceof THREE.Mesh) {
+                child.geometry.dispose();
+                if (Array.isArray(child.material)) {
+                    child.material.forEach(m => m.dispose());
+                } else {
+                    child.material.dispose();
+                }
+            }
+        });
+       }
+    };
+  }, [width, height, NUMBER_OF_ENEMIES]);
+
+
+  useEffect(() => {
+    if (!playerMeshRef.current || !cameraRef.current ||
+        !sceneRef.current || !playerPathMeshRef.current ||
+        enemyMeshRefs.current.length !== NUMBER_OF_ENEMIES ||
+        enemyPathMeshRefs.current.length !== NUMBER_OF_ENEMIES) return;
+
+    const player3DWorldY = -STAGE_TRUE_DEPRESSION_DEPTH + (PLAYER_CUBE_SIZE / 2);
+    const player3DPos = mapTo3D(playerPosition.x, playerPosition.y, player3DWorldY);
+    playerMeshRef.current.position.copy(player3DPos);
+
+    if (isGameRunning && (playerDirection.dx !== 0 || playerDirection.dy !== 0)) {
+        const angle = Math.atan2(playerDirection.dx, playerDirection.dy);
+        playerMeshRef.current.rotation.y = angle;
+    }
+
+    enemiesState.forEach((enemyState, index) => {
+        const enemyMesh = enemyMeshRefs.current[index];
+        const enemyPathMesh = enemyPathMeshRefs.current[index];
+        if (!enemyMesh || !enemyPathMesh) return;
+
+        const enemy3DWorldY = -STAGE_TRUE_DEPRESSION_DEPTH + (ENEMY_CUBE_SIZE / 2);
+        const enemy3DPos = mapTo3D(enemyState.position.x, enemyState.position.y, enemy3DWorldY);
+        enemyMesh.position.copy(enemy3DPos);
+        enemyMesh.material.color.set(enemyState.color);
+        if (isGameRunning && (enemyState.direction.dx !== 0 || enemyState.direction.dy !== 0)) {
+            const angle = Math.atan2(enemyState.direction.dx, enemyState.direction.dy);
+            enemyMesh.rotation.y = angle;
+        }
+
+        enemyPathMesh.material.color.set(enemyState.pathColor);
+        if (enemyState.activePath.length < 2) {
+             if (enemyPathMesh.geometry && !(enemyPathMesh.geometry instanceof THREE.BufferGeometry && enemyPathMesh.geometry.attributes.position === undefined) ){
+                enemyPathMesh.geometry.dispose();
+                enemyPathMesh.geometry = new THREE.BufferGeometry();
+            }
+        } else {
+            const enemyPathPoints3D = enemyState.activePath.map(p => mapTo3D(p.x, p.y, pathTubeCenterY));
+            const enemyCurve = new THREE.CatmullRomCurve3(enemyPathPoints3D, false, 'catmullrom', 0.0);
+
+            if (enemyPathMesh.geometry && !(enemyPathMesh.geometry instanceof THREE.BufferGeometry && enemyPathMesh.geometry.attributes.position === undefined) ){
+                 enemyPathMesh.geometry.dispose();
+            }
+            try {
+                 enemyPathMesh.geometry = new THREE.TubeGeometry(enemyCurve, PATH_TUBE_TUBULAR_SEGMENTS, PATH_TUBE_RADIUS_3D, PATH_TUBE_RADIAL_SEGMENTS, false);
+            } catch (error) {
+                 enemyPathMesh.geometry = new THREE.BufferGeometry();
+            }
+        }
+    });
+
+    cameraRef.current.position.x = player3DPos.x;
+    cameraRef.current.position.y = player3DPos.y + CAMERA_HEIGHT_OFFSET;
+    cameraRef.current.position.z = player3DPos.z + CAMERA_DISTANCE_OFFSET;
+    cameraRef.current.lookAt(player3DPos);
+
+    if (playerPathMeshRef.current) {
+        if (activePath.length < 2) {
+            if (playerPathMeshRef.current.geometry && !(playerPathMeshRef.current.geometry instanceof THREE.BufferGeometry && playerPathMeshRef.current.geometry.attributes.position === undefined) ){
+                playerPathMeshRef.current.geometry.dispose();
+                playerPathMeshRef.current.geometry = new THREE.BufferGeometry();
+            }
+        } else {
+            const playerPathPoints3D = activePath.map(p => mapTo3D(p.x, p.y, pathTubeCenterY));
+            const playerCurve = new THREE.CatmullRomCurve3(playerPathPoints3D, false, 'catmullrom', 0.0);
+
+            if (playerPathMeshRef.current.geometry && !(playerPathMeshRef.current.geometry instanceof THREE.BufferGeometry && playerPathMeshRef.current.geometry.attributes.position === undefined) ){
+                 playerPathMeshRef.current.geometry.dispose();
+            }
+            try {
+                playerPathMeshRef.current.geometry = new THREE.TubeGeometry(playerCurve, PATH_TUBE_TUBULAR_SEGMENTS, PATH_TUBE_RADIUS_3D, PATH_TUBE_RADIAL_SEGMENTS, false);
+            } catch (error) {
+                 playerPathMeshRef.current.geometry = new THREE.BufferGeometry();
+            }
+        }
+    }
+
+    if (territoryGroupRef.current) {
+      while (territoryGroupRef.current.children.length > 0) {
+        const child = territoryGroupRef.current.children[0];
+        territoryGroupRef.current.remove(child);
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          if (Array.isArray(child.material)) {
+            child.material.forEach(m => m.dispose());
+          } else {
+            child.material.dispose();
+          }
+        }
+      }
+
+      const territoryBaseYOnStage = -STAGE_TRUE_DEPRESSION_DEPTH + 0.02;
+
+      allDisplayTerritories.forEach(territoryData => {
+        const gameCoordsPolygon = territoryData.polygon;
+        if (gameCoordsPolygon.length < 3) return;
+
+        const shapePoints = gameCoordsPolygon.map(p =>
+            new THREE.Vector2(p.x - CANVAS_WIDTH / 2, (CANVAS_HEIGHT / 2) - p.y)
+        );
+        const territoryShape = new THREE.Shape(shapePoints);
+
+        const extrudeSettings = {
+            depth: TERRITORY_EXTRUSION_DEPTH,
+            bevelEnabled: false,
+        };
+        const territoryGeometry = new THREE.ExtrudeGeometry(territoryShape, extrudeSettings);
+        
+        // Determine opacity from the territoryData.style.fillColor if it's rgba
+        let opacity = 1;
+        const colorString = territoryData.style.fillColor;
+        if (typeof colorString === 'string' && colorString.startsWith('rgba')) {
+            const parts = colorString.split(',');
+            if (parts.length === 4) {
+                opacity = parseFloat(parts[3]);
+            }
+        }
+
+        const territoryMaterial = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(territoryData.style.fillColor.replace(/rgba\(.*?\)/, 'rgb(' + colorString.split(',').slice(0,3).join(',') + ')').replace('rgb(','').replace(')','').split(',').map(s=>parseInt(s.trim())).reduce((acc, val, i) => acc + (val << (16 - i*8)),0)), // Convert rgba to hex for color
+            side: THREE.DoubleSide,
+            transparent: opacity < 1,
+            opacity: opacity,
+        });
+        const territoryMesh = new THREE.Mesh(territoryGeometry, territoryMaterial);
+        territoryMesh.castShadow = true;
+        territoryMesh.receiveShadow = true;
+        territoryMesh.rotation.x = -Math.PI / 2;
+        territoryMesh.position.y = territoryBaseYOnStage;
+
+        territoryGroupRef.current?.add(territoryMesh);
+      });
+    }
+
+  }, [playerPosition, playerDirection, activePath, enemiesState, allDisplayTerritories, isGameRunning, width, height, pathTubeCenterY, NUMBER_OF_ENEMIES]);
+
+  return React.createElement("div", { ref: mountRef, style: { width, height, backgroundColor: '#000' } });
+};
+
+if (!THREE.ShapeUtils.triangulateShape) {
+    THREE.ShapeUtils.triangulateShape = (contour, holes) => {
+        const vertices = [];
+        for (const point of contour) {
+            vertices.push(point.x, point.y);
+        }
+        const holeIndices = [];
+        if (holes) {
+            for (const hole of holes) {
+                holeIndices.push(vertices.length / 2);
+                for (const point of hole) {
+                    vertices.push(point.x, point.y);
+                }
+            }
+        }
+        const triangles = earcut(vertices, holeIndices.length > 0 ? holeIndices : null, 2);
+        const faces = [];
+        for (let i = 0; i < triangles.length; i += 3) {
+            faces.push([triangles[i], triangles[i + 1], triangles[i + 2]]);
+        }
+        return faces;
+    };
+}
+
+// Content from App.tsx
+const calculatePolygonArea = (vertices) => {
+  let area = 0;
+  for (let i = 0; i < vertices.length; i++) {
+    const j = (i + 1) % vertices.length;
+    area += vertices[i].x * vertices[j].y;
+    area -= vertices[j].x * vertices[i].y;
+  }
+  return Math.abs(area / 2);
+};
+const distanceBetweenPoints = (p1, p2) => {
+  return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+};
+const distToSegmentSquared = (p, v, w) => {
+  const l2 = distanceBetweenPoints(v, w) ** 2;
+  if (l2 === 0) return distanceBetweenPoints(p, v) ** 2;
+  let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  const closestPoint = { x: v.x + t * (w.x - v.x), y: v.y + t * (w.y - v.y) };
+  return distanceBetweenPoints(p, closestPoint) ** 2;
+};
+const distToSegment = (p, v, w) => {
+    return Math.sqrt(distToSegmentSquared(p, v, w));
+};
+const normalizeVector = (vec) => {
+    const magnitude = Math.sqrt(vec.dx * vec.dx + vec.dy * vec.dy);
+    if (magnitude === 0) return { dx: 0, dy: 0 };
+    return { dx: vec.dx / magnitude, dy: vec.dy / magnitude };
+};
+const isSamePolygon = (poly1, poly2, tolerance = 0.1) => {
+    if (poly1.length !== poly2.length) return false;
+    if (poly1.length === 0 && poly2.length === 0) return true;
+    if (poly1.length === 0 || poly2.length === 0) return false;
+    for (let k = 0; k < poly1.length; k++) {
+        if (distanceBetweenPoints(poly1[k], poly2[k]) > tolerance) {
+            return false;
+        }
+    }
+    return true;
+};
+
+const stageCenterX = CANVAS_WIDTH / 2;
+const stageCenterY = CANVAS_HEIGHT / 2;
+const stageRadius = Math.min(CANVAS_WIDTH, CANVAS_HEIGHT) / 2 * STAGE_RADIUS_FACTOR;
+
+const App = () => {
+  const [playerPosition, setPlayerPosition] = useState({
+    x: CANVAS_WIDTH / 2,
+    y: CANVAS_HEIGHT / 2,
+  });
+  const [playerDirection, setPlayerDirection] = useState({ dx: 0, dy: 0 });
+  const [activePath, setActivePath] = useState([]);
+  const [isGameRunning, setIsGameRunning] = useState(false);
+  const [isGameOver, setIsGameOver] = useState(false);
+  const [gameOverMessageText, setGameOverMessageText] = useState("");
+  const [directionAtPlayerTerritoryFormation, setDirectionAtPlayerTerritoryFormation] = useState(null);
+  const [allDisplayTerritories, setAllDisplayTerritories] = useState([]);
+  const [nextTerritoryId, setNextTerritoryId] = useState(0);
+  const [gameDimensions, setGameDimensions] = useState({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT });
+  const headerRef = useRef(null);
+  const footerRef = useRef(null);
+
+  useEffect(() => {
+    const calculateGameSize = () => {
+      const headerHeight = headerRef.current ? headerRef.current.offsetHeight : 60;
+      const footerHeight = footerRef.current ? footerRef.current.offsetHeight : 180;
+      const verticalPadding = 32;
+      const horizontalPadding = 32;
+
+      const availableWidth = window.innerWidth - horizontalPadding;
+      const availableHeight = window.innerHeight - headerHeight - footerHeight - verticalPadding;
+
+      let newWidth = Math.min(availableWidth, CANVAS_WIDTH);
+      let newHeight = (newWidth / CANVAS_WIDTH) * CANVAS_HEIGHT;
+
+      if (newHeight > availableHeight) {
+        newHeight = Math.min(availableHeight, CANVAS_HEIGHT);
+        newWidth = (newHeight / CANVAS_HEIGHT) * CANVAS_WIDTH;
+      }
+
+      newWidth = Math.max(newWidth, CANVAS_WIDTH / 2.5);
+      newHeight = Math.max(newHeight, CANVAS_HEIGHT / 2.5);
+
+      setGameDimensions({ width: Math.floor(newWidth), height: Math.floor(newHeight) });
+    };
+
+    const timerId = setTimeout(calculateGameSize, 50);
+    window.addEventListener('resize', calculateGameSize);
+
+    return () => {
+      clearTimeout(timerId);
+      window.removeEventListener('resize', calculateGameSize);
+    };
+  }, []);
+
+  const getInitialEnemyState = useCallback((id, colorPaletteIndexInput, existingPositions = []) => {
+    const safeColorPaletteIndex = colorPaletteIndexInput % ENEMY_COLOR_PALETTE.length;
+    const enemyColors = ENEMY_COLOR_PALETTE[safeColorPaletteIndex];
+    const enemyEntityRadius = ENEMY_CUBE_SIZE / 2;
+    let initialEnemyX, initialEnemyY;
+
+    const allInitialEntities = [...existingPositions, {x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2}];
+    let attempts = 0;
+    do {
+        initialEnemyX = Math.random() * (CANVAS_WIDTH - enemyEntityRadius * 2) + enemyEntityRadius;
+        initialEnemyY = Math.random() * (CANVAS_HEIGHT - enemyEntityRadius * 2) + enemyEntityRadius;
+        attempts++;
+        if (attempts > 50) {
+             initialEnemyX = (id % 2 === 0) ? CANVAS_WIDTH / 4 : (CANVAS_WIDTH * 3) / 4;
+             initialEnemyY = (id < NUMBER_OF_ENEMIES / 2) ? CANVAS_HEIGHT / 4 : (CANVAS_HEIGHT * 3) / 4;
+             break;
+        }
+    } while (allInitialEntities.some(p => distanceBetweenPoints({x:initialEnemyX, y:initialEnemyY}, p) < ENEMY_CUBE_SIZE * 2 ))
+
+    const distFromCenter = distanceBetweenPoints({x: initialEnemyX, y: initialEnemyY}, {x: stageCenterX, y: stageCenterY});
+    if (distFromCenter > stageRadius - enemyEntityRadius) {
+        const angle = Math.atan2(initialEnemyY - stageCenterY, initialEnemyX - stageCenterX);
+        initialEnemyX = stageCenterX + (stageRadius - enemyEntityRadius - 1) * Math.cos(angle);
+        initialEnemyY = stageCenterY + (stageRadius - enemyEntityRadius - 1) * Math.sin(angle);
+    }
+    const initialPos = { x: initialEnemyX, y: initialEnemyY };
+
+    let maxPossibleAICircleRadius = stageRadius - enemyEntityRadius;
+    maxPossibleAICircleRadius = Math.max(10, maxPossibleAICircleRadius);
+
+    let aiCircleRadius = ENEMY_CIRCLE_MIN_RADIUS + Math.random() * (Math.min(ENEMY_CIRCLE_MAX_RADIUS, maxPossibleAICircleRadius) - ENEMY_CIRCLE_MIN_RADIUS);
+    aiCircleRadius = Math.max(10, Math.min(aiCircleRadius, maxPossibleAICircleRadius));
+
+    const maxDistForAICenter = stageRadius - aiCircleRadius - enemyEntityRadius;
+    let aiCircleCenterX, aiCircleCenterY;
+
+    if (maxDistForAICenter <= 0) {
+        aiCircleCenterX = stageCenterX;
+        aiCircleCenterY = stageCenterY;
+        aiCircleRadius = Math.min(aiCircleRadius, stageRadius - enemyEntityRadius);
+        aiCircleRadius = Math.max(10, aiCircleRadius);
+    } else {
+        const randomAngle = Math.random() * 2 * Math.PI;
+        const randomDist = Math.random() * maxDistForAICenter;
+        aiCircleCenterX = stageCenterX + randomDist * Math.cos(randomAngle);
+        aiCircleCenterY = stageCenterY + randomDist * Math.sin(randomAngle);
+    }
+
+    return {
+      id,
+      position: initialPos,
+      direction: normalizeVector({ dx: Math.random() * 2 - 1, dy: Math.random() * 2 - 1 }),
+      activePath: [initialPos],
+      newlyFormedPolygonForApp: null,
+      ...enemyColors,
+      currentColorPaletteIndex: safeColorPaletteIndex,
+      aiState: 'drawing_circle',
+      circleCenter: { x: aiCircleCenterX, y: aiCircleCenterY },
+      ovalAngle: Math.random() * 2 * Math.PI,
+      circleRadius: aiCircleRadius,
+      ovalTurnDirection: Math.random() > 0.5 ? 1 : -1,
+      closureTargetIndex: null,
+      directionAtTerritoryFormation: null,
+    };
+  }, [stageRadius, ENEMY_COLOR_PALETTE, ENEMY_CUBE_SIZE, NUMBER_OF_ENEMIES, ENEMY_CIRCLE_MIN_RADIUS, ENEMY_CIRCLE_MAX_RADIUS]);
+
+  const [enemiesState, setEnemiesState] = useState(() => {
+    const initialEnemies = [];
+    const existingPos = [];
+    for (let i = 0; i < NUMBER_OF_ENEMIES; i++) {
+        const newEnemy = getInitialEnemyState(i, i, existingPos);
+        initialEnemies.push(newEnemy);
+        existingPos.push(newEnemy.position);
+    }
+    return initialEnemies;
+  });
+
+  const gameLoopRef = useRef(0);
+
+  const startGameInternal = useCallback(() => {
+    setIsGameRunning(true);
+    setIsGameOver(false);
+    setGameOverMessageText("");
+    setPlayerPosition(prev => {
+        const startPath = [prev];
+        setActivePath(startPath);
+        if (playerDirection.dx === 0 && playerDirection.dy === 0) {
+             setPlayerDirection(normalizeVector({dx:1, dy:0}));
+        }
+        return prev;
+    });
+    setDirectionAtPlayerTerritoryFormation(null);
+    setEnemiesState(prevEnemies => {
+        const newEnemies = [];
+        const existingPos = [];
+         prevEnemies.forEach((enemy, index) => {
+            const resetAIState = getInitialEnemyState(enemy.id, enemy.currentColorPaletteIndex, existingPos);
+            newEnemies.push({
+                ...enemy,
+                ...resetAIState,
+                position: prevEnemies[index].position,
+                activePath: [prevEnemies[index].position],
+                directionAtTerritoryFormation: null,
+                newlyFormedPolygonForApp: null,
+            });
+            existingPos.push(newEnemies[index].position);
+        });
+        return newEnemies;
+    });
+  }, [playerDirection.dx, playerDirection.dy, getInitialEnemyState]);
+
+  const resetGame = useCallback(() => {
+    setIsGameRunning(false);
+    setIsGameOver(false);
+    setGameOverMessageText("");
+    const initialPlayerPos = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
+    setPlayerPosition(initialPlayerPos);
+    setPlayerDirection({ dx: 0, dy: 0 });
+    setActivePath([initialPlayerPos]);
+    setAllDisplayTerritories([]);
+    setNextTerritoryId(0);
+    setDirectionAtPlayerTerritoryFormation(null);
+
+    const initialEnemies = [];
+    const existingPos = [];
+    for (let i = 0; i < NUMBER_OF_ENEMIES; i++) {
+        const newEnemy = getInitialEnemyState(i, i, existingPos);
+        initialEnemies.push(newEnemy);
+        existingPos.push(newEnemy.position);
+    }
+    setEnemiesState(initialEnemies);
+
+    if (gameLoopRef.current) {
+      cancelAnimationFrame(gameLoopRef.current);
+    }
+  }, [getInitialEnemyState, NUMBER_OF_ENEMIES]);
+
+  const resetSpecificEnemy = useCallback((enemyIdToReset, playerPosForReference) => {
+    setAllDisplayTerritories(prevTerritories =>
+        prevTerritories.filter(territory => territory.ownerIdentifier !== enemyIdToReset)
+    );
+
+    setEnemiesState(prevEnemies => {
+        return prevEnemies.map(enemy => {
+            if (enemy.id === enemyIdToReset) {
+                const currentPaletteIndex = enemy.currentColorPaletteIndex;
+                const newPaletteIndex = (currentPaletteIndex + 1) % ENEMY_COLOR_PALETTE.length;
+
+                const enemyEntityRadius = ENEMY_CUBE_SIZE / 2;
+                let spawnX = stageCenterX + (stageCenterX - (playerPosForReference?.x ?? stageCenterX));
+                let spawnY = stageCenterY + (stageCenterY - (playerPosForReference?.y ?? stageCenterY));
+
+                const distFromCenter = distanceBetweenPoints({ x: spawnX, y: spawnY }, { x: stageCenterX, y: stageCenterY });
+                if (distFromCenter > stageRadius - enemyEntityRadius || distFromCenter === 0) {
+                    const angle = Math.random() * 2 * Math.PI;
+                    spawnX = stageCenterX + (stageRadius - enemyEntityRadius - 5) * Math.cos(angle);
+                    spawnY = stageCenterY + (stageRadius - enemyEntityRadius - 5) * Math.sin(angle);
+                }
+
+                const newEnemyInitialPos = { x: spawnX, y: spawnY };
+                const resetState = getInitialEnemyState(enemy.id, newPaletteIndex, []);
+                return {
+                    ...resetState,
+                    position: newEnemyInitialPos,
+                    activePath: [newEnemyInitialPos],
+                };
+            }
+            return enemy;
+        });
+    });
+  }, [getInitialEnemyState, stageRadius, ENEMY_COLOR_PALETTE, ENEMY_CUBE_SIZE]);
+
+  const handlePlayerKeyboardAction = useCallback((action) => {
+    if (isGameOver) return;
+    if (!isGameRunning && action !== PlayerAction.NONE) {
+        startGameInternal();
+    }
+
+    setPlayerDirection(currentDirection => {
+      let newDx = currentDirection.dx;
+      let newDy = currentDirection.dy;
+
+      switch (action) {
+        case PlayerAction.MOVE_UP: newDx = 0; newDy = -1; break;
+        case PlayerAction.MOVE_DOWN: newDx = 0; newDy = 1; break;
+        case PlayerAction.MOVE_LEFT: newDx = -1; newDy = 0; break;
+        case PlayerAction.MOVE_RIGHT: newDx = 1; newDy = 0; break;
+        case PlayerAction.NONE:
+          return currentDirection;
+        default: return currentDirection;
+      }
+      if (newDx === 0 && newDy === 0) {
+          if(currentDirection.dx === 0 && currentDirection.dy === 0) return normalizeVector({dx:1, dy:0});
+          return currentDirection;
+      }
+      return normalizeVector({ dx: newDx, dy: newDy });
+    });
+  }, [isGameRunning, isGameOver, startGameInternal]);
+
+  const handleAnalogMove = useCallback((direction) => {
+    if (isGameOver) return;
+    if (!isGameRunning && (direction.dx !== 0 || direction.dy !== 0)) {
+        startGameInternal();
+    }
+    if (direction.dx !== 0 || direction.dy !== 0) {
+        setPlayerDirection(normalizeVector(direction));
+    } else if (isGameRunning) {
+        // Continuous movement
+    } else {
+        setPlayerDirection({dx:0, dy:0});
+    }
+  }, [isGameRunning, isGameOver, startGameInternal]);
+
+  const handleAnalogRelease = useCallback(() => {
+    // Player continues moving
+  }, []);
+
+  useEffect(() => {
+    enemiesState.forEach(enemy => {
+        if (enemy.newlyFormedPolygonForApp) {
+            const newPoly = enemy.newlyFormedPolygonForApp;
+            const enemyStyle = {
+                fillColor: enemy.territoryColor,
+                borderColor: enemy.territoryBorderColor,
+            };
+            const currentTerritoryId = nextTerritoryId;
+
+            setAllDisplayTerritories(prevDisplay => {
+                const filtered = prevDisplay.filter(existingTerritory =>
+                    !isSamePolygon(existingTerritory.polygon, newPoly)
+                );
+                const newDisplayTerritory = {
+                    id: currentTerritoryId,
+                    polygon: newPoly,
+                    style: enemyStyle,
+                    type: 'enemy',
+                    ownerIdentifier: enemy.id,
+                };
+                return [...filtered, newDisplayTerritory];
+            });
+            setNextTerritoryId(prevId => prevId + 1);
+
+            setEnemiesState(prevEnemies => prevEnemies.map(e =>
+                e.id === enemy.id ? { ...e, newlyFormedPolygonForApp: null } : e
+            ));
+        }
+    });
+  }, [enemiesState, nextTerritoryId]);
+
+  const gameUpdate = useCallback(() => {
+    if (!isGameRunning || isGameOver) {
+      if (isGameRunning && isGameOver && gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
+      else if (!isGameRunning && !isGameOver) gameLoopRef.current = requestAnimationFrame(gameUpdate);
+      return;
+    }
+
+    if (playerDirection.dx !== 0 || playerDirection.dy !== 0) {
+        if (directionAtPlayerTerritoryFormation) {
+            const newDirIsDifferent = playerDirection.dx !== directionAtPlayerTerritoryFormation.dx ||
+                                    playerDirection.dy !== directionAtPlayerTerritoryFormation.dy;
+            if (newDirIsDifferent) {
+                setActivePath([playerPosition]);
+                setDirectionAtPlayerTerritoryFormation(null);
+            }
+        }
+
+        setPlayerPosition(prevPos => {
+            let newX = prevPos.x + playerDirection.dx * PLAYER_SPEED;
+            let newY = prevPos.y + playerDirection.dy * PLAYER_SPEED;
+            let hitBoundary = false;
+            const playerEntityRadius = PLAYER_CUBE_SIZE / 2;
+
+            const distFromStageCenter = distanceBetweenPoints({ x: newX, y: newY }, { x: stageCenterX, y: stageCenterY });
+            if (distFromStageCenter > stageRadius - playerEntityRadius) {
+                hitBoundary = true;
+                const angleToCenter = Math.atan2(newY - stageCenterY, newX - stageCenterX);
+                newX = stageCenterX + (stageRadius - playerEntityRadius) * Math.cos(angleToCenter);
+                newY = stageCenterY + (stageRadius - playerEntityRadius) * Math.sin(angleToCenter);
+            }
+
+            const newPlayerPos = { x: newX, y: newY };
+
+            setActivePath(currentPath => {
+                let updatedPath = currentPath;
+                if (updatedPath.length === 0 || distanceBetweenPoints(updatedPath[updatedPath.length - 1], newPlayerPos) > 0.1) {
+                    updatedPath = [...updatedPath, newPlayerPos];
+                }
+
+                if (updatedPath.length >= MIN_PATH_POINTS_FOR_LOOP) {
+                    for (let i = 0; i < updatedPath.length - (MIN_PATH_POINTS_FOR_LOOP - 2); i++) {
+                        if (distanceBetweenPoints(newPlayerPos, updatedPath[i]) < INTERSECTION_THRESHOLD) {
+                            const newTerritoryPolygon = updatedPath.slice(i);
+                            if (newTerritoryPolygon.length >= 3) {
+                                const newArea = calculatePolygonArea(newTerritoryPolygon);
+                                if (newArea >= MIN_TERRITORY_AREA_THRESHOLD) {
+                                    const currentTerritoryId = nextTerritoryId;
+                                    setAllDisplayTerritories(prevDisplay => {
+                                        const filtered = prevDisplay.filter(existingTerritory =>
+                                            !isSamePolygon(existingTerritory.polygon, newTerritoryPolygon)
+                                        );
+                                        const playerStyle = { fillColor: TERRITORY_COLOR, borderColor: TERRITORY_BORDER_COLOR };
+                                        const newDisplayTerritory = {
+                                            id: currentTerritoryId,
+                                            polygon: newTerritoryPolygon,
+                                            style: playerStyle,
+                                            type: 'player',
+                                            ownerIdentifier: 'player',
+                                        };
+                                        return [...filtered, newDisplayTerritory];
+                                    });
+                                    setNextTerritoryId(prevId => prevId + 1);
+                                    setDirectionAtPlayerTerritoryFormation(playerDirection);
+                                }
+                            }
+                        }
+                    }
+                }
+                return updatedPath;
+            });
+
+            if (hitBoundary) {
+                 setPlayerDirection({dx: 0, dy: 0});
+            }
+            return newPlayerPos;
+        });
+    } else {
+         setActivePath(currentPath => {
+            if (currentPath.length === 0) return [playerPosition];
+            if (currentPath.length > 0 && distanceBetweenPoints(currentPath[currentPath.length-1], playerPosition) > 0.1) {
+                return [...currentPath, playerPosition];
+            }
+            return currentPath;
+        });
+    }
+
+    setEnemiesState(prevEnemies => {
+      return prevEnemies.map(currentEnemy => {
+        let {
+            position,
+            direction: prevDirection,
+            activePath: prevActivePath,
+            aiState,
+            circleCenter,
+            ovalAngle,
+            circleRadius,
+            ovalTurnDirection,
+            closureTargetIndex,
+            directionAtTerritoryFormation,
+        } = { ...currentEnemy };
+
+        let currentEnemyDirection = { ...prevDirection };
+        let targetDirection = {dx: 0, dy: 0};
+        let newlyFormedPolygonThisTick = null;
+        const enemyEntityRadius = ENEMY_CUBE_SIZE / 2;
+
+        if (aiState === 'drawing_circle' && prevActivePath.length > ENEMY_POINTS_FOR_CLOSURE_ATTEMPT) {
+            if (prevActivePath.length > ENEMY_CLOSURE_TARGET_PATH_OFFSET + MIN_PATH_POINTS_FOR_LOOP -1) {
+                aiState = 'seeking_closure';
+                closureTargetIndex = ENEMY_CLOSURE_TARGET_PATH_OFFSET;
+            }
+        } else if (aiState === 'seeking_closure' &&
+                   (closureTargetIndex === null ||
+                    closureTargetIndex >= prevActivePath.length -1 ||
+                    !prevActivePath[closureTargetIndex])) {
+            aiState = 'drawing_circle';
+            closureTargetIndex = null;
+        }
+
+        if (aiState === 'seeking_closure' && closureTargetIndex !== null && prevActivePath[closureTargetIndex]) {
+            const targetPoint = prevActivePath[closureTargetIndex];
+            const vectorToTarget = { dx: targetPoint.x - position.x, dy: targetPoint.y - position.y };
+            if (vectorToTarget.dx === 0 && vectorToTarget.dy === 0) {
+                aiState = 'drawing_circle';
+                closureTargetIndex = null;
+            } else {
+                 targetDirection = normalizeVector(vectorToTarget);
+            }
+        }
+
+        if (aiState === 'drawing_circle') {
+            ovalAngle += (ENEMY_SPEED / (Math.max(10, circleRadius))) * ovalTurnDirection * ENEMY_OVAL_ANGLE_SPEED_FACTOR;
+            const targetPointOnCircle = {
+                x: circleCenter.x + circleRadius * Math.cos(ovalAngle),
+                y: circleCenter.y + circleRadius * Math.sin(ovalAngle),
+            };
+            const vectorToCircleTarget = { dx: targetPointOnCircle.x - position.x, dy: targetPointOnCircle.y - position.y };
+            if (vectorToCircleTarget.dx === 0 && vectorToCircleTarget.dy === 0 && ENEMY_SPEED > 0) {
+                targetDirection = normalizeVector({dx: Math.cos(ovalAngle + (Math.PI/2 * ovalTurnDirection)), dy: Math.sin(ovalAngle + (Math.PI/2 * ovalTurnDirection))});
+            } else if (vectorToCircleTarget.dx !== 0 || vectorToCircleTarget.dy !== 0) {
+                targetDirection = normalizeVector(vectorToCircleTarget);
+            } else {
+                targetDirection = normalizeVector({dx: ovalTurnDirection, dy: 0});
+            }
+        }
+
+        currentEnemyDirection = normalizeVector(targetDirection);
+        if(currentEnemyDirection.dx === 0 && currentEnemyDirection.dy === 0 && ENEMY_SPEED > 0) {
+             currentEnemyDirection = normalizeVector({dx: prevDirection.dx || ovalTurnDirection, dy: prevDirection.dy || 0});
+             if(currentEnemyDirection.dx === 0 && currentEnemyDirection.dy === 0) currentEnemyDirection = {dx:1, dy:0};
+        }
+
+        let newActivePathForEnemy = prevActivePath;
+        if (directionAtTerritoryFormation) {
+            const newDirIsDifferent = currentEnemyDirection.dx !== directionAtTerritoryFormation.dx ||
+                                    currentEnemyDirection.dy !== directionAtTerritoryFormation.dy;
+            if (newDirIsDifferent && (currentEnemyDirection.dx !== 0 || currentEnemyDirection.dy !== 0)) {
+                newActivePathForEnemy = [position];
+                directionAtTerritoryFormation = null;
+            }
+        }
+
+        let newEx = position.x + currentEnemyDirection.dx * ENEMY_SPEED;
+        let newEy = position.y + currentEnemyDirection.dy * ENEMY_SPEED;
+        let hitBoundary = false;
+
+        const distFromStageCenter = distanceBetweenPoints({ x: newEx, y: newEy }, { x: stageCenterX, y: stageCenterY });
+        if (distFromStageCenter > stageRadius - enemyEntityRadius) {
+            hitBoundary = true;
+            const angleToCenter = Math.atan2(newEy - stageCenterY, newEx - stageCenterX);
+            newEx = stageCenterX + (stageRadius - enemyEntityRadius) * Math.cos(angleToCenter);
+            newEy = stageCenterY + (stageRadius - enemyEntityRadius) * Math.sin(angleToCenter);
+
+            ovalTurnDirection *= -1;
+            if (aiState === 'seeking_closure') {
+                aiState = 'drawing_circle';
+                closureTargetIndex = null;
+            }
+            const maxAICenterDist = stageRadius - circleRadius - enemyEntityRadius;
+            if (maxAICenterDist > 0) {
+                const distAICenterFromStageCenter = distanceBetweenPoints(circleCenter, {x: stageCenterX, y: stageCenterY});
+                if (distAICenterFromStageCenter > maxAICenterDist) {
+                    const angleAICenterToStageCenter = Math.atan2(circleCenter.y - stageCenterY, circleCenter.x - stageCenterX);
+                    circleCenter.x = stageCenterX + maxAICenterDist * Math.cos(angleAICenterToStageCenter);
+                    circleCenter.y = stageCenterY + maxAICenterDist * Math.sin(angleAICenterToStageCenter);
+                }
+            } else {
+                circleCenter.x = stageCenterX;
+                circleCenter.y = stageCenterY;
+            }
+        }
+
+        const newEnemyPos = { x: newEx, y: newEy };
+        let updatedEnemyPath = newActivePathForEnemy;
+        if (updatedEnemyPath.length === 0 || distanceBetweenPoints(updatedEnemyPath[updatedEnemyPath.length - 1], newEnemyPos) > 0.1) {
+            updatedEnemyPath = [...updatedEnemyPath, newEnemyPos];
+        }
+
+        if (updatedEnemyPath.length >= MIN_PATH_POINTS_FOR_LOOP) {
+            const checkUntilIndex = updatedEnemyPath.length - (MIN_PATH_POINTS_FOR_LOOP - 2);
+            for (let i = 0; i < checkUntilIndex; i++) {
+                 if (aiState === 'seeking_closure' && closureTargetIndex !== null && Math.abs(i - closureTargetIndex) > 3 && updatedEnemyPath.length - i > 15) {
+                 } else if (updatedEnemyPath.length - i < MIN_PATH_POINTS_FOR_LOOP ) {
+                    continue;
+                 }
+                if (!updatedEnemyPath[i]) continue;
+
+                if (distanceBetweenPoints(newEnemyPos, updatedEnemyPath[i]) < INTERSECTION_THRESHOLD) {
+                    const newTerritoryPolygon = updatedEnemyPath.slice(i);
+                    if (newTerritoryPolygon.length >= 3) {
+                        const newArea = calculatePolygonArea(newTerritoryPolygon);
+                        if (newArea >= MIN_TERRITORY_AREA_THRESHOLD) {
+                            newlyFormedPolygonThisTick = newTerritoryPolygon;
+                            directionAtTerritoryFormation = currentEnemyDirection;
+                            aiState = 'drawing_circle';
+                            closureTargetIndex = null;
+
+                            let maxPossibleAICircleRadius = stageRadius - enemyEntityRadius;
+                            maxPossibleAICircleRadius = Math.max(10, maxPossibleAICircleRadius);
+                            let newAICircleRadius = ENEMY_CIRCLE_MIN_RADIUS + Math.random() * (Math.min(ENEMY_CIRCLE_MAX_RADIUS, maxPossibleAICircleRadius) - ENEMY_CIRCLE_MIN_RADIUS);
+                            newAICircleRadius = Math.max(10, Math.min(newAICircleRadius, maxPossibleAICircleRadius));
+                            const maxDistForAICenter = stageRadius - newAICircleRadius - enemyEntityRadius;
+                            if (maxDistForAICenter <= 0) {
+                                circleCenter.x = stageCenterX;
+                                circleCenter.y = stageCenterY;
+                                newAICircleRadius = Math.min(newAICircleRadius, stageRadius - enemyEntityRadius);
+                                newAICircleRadius = Math.max(10, newAICircleRadius);
+                            } else {
+                                const randomAngle = Math.random() * 2 * Math.PI;
+                                const randomDist = Math.random() * maxDistForAICenter;
+                                circleCenter.x = stageCenterX + randomDist * Math.cos(randomAngle);
+                                circleCenter.y = stageCenterY + randomDist * Math.sin(randomAngle);
+                            }
+                            circleRadius = newAICircleRadius;
+                            ovalAngle = Math.random() * 2 * Math.PI;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        return {
+            ...currentEnemy,
+            position: newEnemyPos,
+            direction: currentEnemyDirection,
+            activePath: updatedEnemyPath,
+            aiState, circleCenter, ovalAngle, circleRadius, ovalTurnDirection, closureTargetIndex,
+            directionAtTerritoryFormation,
+            newlyFormedPolygonForApp: newlyFormedPolygonThisTick,
+        };
+      });
+    });
+
+    if (!isGameOver && activePath.length > 1) {
+      for (const enemy of enemiesState) {
+        const enemyHead = enemy.position;
+        for (let i = 0; i < activePath.length -1; i++) {
+            const p1 = activePath[i];
+            const p2 = activePath[i+1];
+            if (distToSegment(enemyHead, p1, p2) < ENEMY_COLLISION_THRESHOLD) {
+                setIsGameOver(true);
+                setGameOverMessageText(GAME_OVER_MESSAGE);
+                setIsGameRunning(false);
+                break;
+            }
+        }
+        if (isGameOver) break;
+
+        if (!isGameOver && activePath.length > 0 &&
+            distanceBetweenPoints(enemyHead, activePath[activePath.length - 1]) < ENEMY_COLLISION_THRESHOLD) {
+            setIsGameOver(true);
+            setGameOverMessageText(GAME_OVER_MESSAGE);
+            setIsGameRunning(false);
+            break;
+        }
+      }
+    }
+
+    if (!isGameOver) {
+      const playerHead = playerPosition;
+      for (const enemy of enemiesState) {
+        if (enemy.activePath.length > 1) {
+            for (let i = 0; i < enemy.activePath.length -1; i++) {
+                const ep1 = enemy.activePath[i];
+                const ep2 = enemy.activePath[i+1];
+                if (distToSegment(playerHead, ep1, ep2) < PLAYER_COLLISION_WITH_ENEMY_PATH_THRESHOLD) {
+                    resetSpecificEnemy(enemy.id, playerPosition);
+                    break;
+                }
+            }
+        }
+        if (enemy.activePath.length > 0 &&
+            distanceBetweenPoints(playerHead, enemy.activePath[enemy.activePath.length - 1]) < PLAYER_COLLISION_WITH_ENEMY_PATH_THRESHOLD) {
+            resetSpecificEnemy(enemy.id, playerPosition);
+        }
+      }
+    }
+
+    gameLoopRef.current = requestAnimationFrame(gameUpdate);
+  }, [isGameRunning, isGameOver, playerDirection, playerPosition, activePath, enemiesState, resetSpecificEnemy, directionAtPlayerTerritoryFormation, nextTerritoryId, getInitialEnemyState, stageRadius]);
+
+  const playerScore = useMemo(() => {
+    return allDisplayTerritories
+        .filter(t => t.ownerIdentifier === 'player')
+        .reduce((sum, t) => sum + calculatePolygonArea(t.polygon), 0);
+  }, [allDisplayTerritories]);
+
+  const enemyScores = useMemo(() => {
+    const scores = enemiesState.map(enemy => {
+        const score = allDisplayTerritories
+            .filter(t => t.ownerIdentifier === enemy.id)
+            .reduce((sum, t) => sum + calculatePolygonArea(t.polygon), 0);
+        return { id: enemy.id, score: Math.floor(score), color: enemy.color };
+    });
+    return scores;
+  }, [allDisplayTerritories, enemiesState]);
+
+  const handleStartGameButton = () => {
+      if (!isGameRunning) {
+          resetGame();
+          startGameInternal();
+      }
+  };
+
+  const handlePlayAgainButton = () => {
+    resetGame();
+    startGameInternal();
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (isGameOver && e.key !== 'Enter' && e.key !== ' ') return;
+      if (isGameOver && (e.key === 'Enter' || e.key === ' ')) {
+          handlePlayAgainButton();
+          return;
+      }
+
+      let action = PlayerAction.NONE;
+      switch (e.key.toLowerCase()) {
+        case 'arrowup': case 'w': action = PlayerAction.MOVE_UP; break;
+        case 'arrowdown': case 's': action = PlayerAction.MOVE_DOWN; break;
+        case 'arrowleft': case 'a': action = PlayerAction.MOVE_LEFT; break;
+        case 'arrowright': case 'd': action = PlayerAction.MOVE_RIGHT; break;
+        default: return;
+      }
+      e.preventDefault();
+      handlePlayerKeyboardAction(action);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handlePlayerKeyboardAction, isGameOver, handlePlayAgainButton]);
+
+  useEffect(() => {
+    gameLoopRef.current = requestAnimationFrame(gameUpdate);
+    return () => {
+      if (gameLoopRef.current) {
+        cancelAnimationFrame(gameLoopRef.current);
+      }
+    };
+  }, [gameUpdate]);
+
+  return (
+    React.createElement("div", { className: "w-screen h-screen bg-sky-100 text-slate-700 flex flex-col items-center justify-between p-4 sm:p-6 overflow-hidden" },
+      React.createElement("header", { ref: headerRef, className: "w-full flex justify-between items-center mb-2 sm:mb-4" },
+        React.createElement("h1", { className: "text-xl sm:text-3xl font-bold text-sky-600 tracking-tight" }, "Vector Trail 3D"),
+        React.createElement(ScoreDisplay, { playerScore: Math.floor(playerScore), enemyScores: enemyScores })
+      ),
+      React.createElement("main", {
+        className: "main-game-container relative flex-grow w-full shadow-2xl rounded-lg overflow-hidden", // Added rounded-lg and overflow-hidden for aesthetics
+        style: {
+            width: gameDimensions.width,
+            height: gameDimensions.height,
+            maxWidth: `${CANVAS_WIDTH}px`,
+            maxHeight: `${CANVAS_HEIGHT}px`,
+        }
+      },
+        React.createElement(ThreeDeeRenderer, {
+            width: gameDimensions.width,
+            height: gameDimensions.height,
+            playerPosition: playerPosition,
+            playerDirection: playerDirection,
+            activePath: activePath,
+            allDisplayTerritories: allDisplayTerritories,
+            enemiesState: enemiesState,
+            isGameRunning: isGameRunning
+        }),
+        React.createElement(Minimap, {
+            width: Math.min(MINIMAP_SIZE, gameDimensions.width * 0.20, gameDimensions.height * 0.25),
+            height: Math.min(MINIMAP_SIZE, gameDimensions.width * 0.20, gameDimensions.height * 0.25),
+            playerPosition: playerPosition,
+            activePath: activePath,
+            allDisplayTerritories: allDisplayTerritories,
+            enemiesState: enemiesState
+        })
+      ),
+      React.createElement("footer", { ref: footerRef, className: "w-full flex flex-col items-center mt-2 sm:mt-4" },
+         React.createElement("p", { className: "text-xs sm:text-sm text-slate-500 text-center h-6 min-h-[1.5rem] px-1 mb-2 sm:mb-3" },
+            isGameOver ? React.createElement("span", { className: "text-red-500 font-semibold" }, gameOverMessageText, " Press Enter/Space or '", PLAY_AGAIN_MESSAGE.slice(0,-1), "' button.") :
+            isGameRunning ? "Draw lines. Close loops to claim territory." : "Press Start Game or use controls."
+        ),
+        React.createElement(GameControls, {
+            onAnalogMove: handleAnalogMove,
+            onAnalogRelease: handleAnalogRelease,
+            onStartGame: handleStartGameButton,
+            onPlayAgain: handlePlayAgainButton,
+            isGameRunning: isGameRunning,
+            isGameOver: isGameOver
+        })
+      )
+    )
+  );
+};
+
+// Content from index.tsx (React DOM render part)
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error("Could not find root element to mount to");
+}
+const root = ReactDOM.createRoot(rootElement);
+root.render(
+  React.createElement(React.StrictMode, null,
+    React.createElement(App, null)
+  )
+);
+  </script>
+</body>
+</html>
